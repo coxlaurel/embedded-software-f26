@@ -22,8 +22,110 @@
   #warning "FPU is not initialized, but the project is compiling for an FPU. Please initialize the FPU before use."
 #endif
 
-int main(void) {
+#define RCC_BASE 0x40023800UL
+#define RCC_AHB1ENR (*(volatile uint32_t *) (RCC_BASE + 0x30))
+#define RCC_APB1ENR (*(volatile uint32_t *) (RCC_BASE + 0x40))
+#define RCC_APB2ENR (*(volatile uint32_t *) (RCC_BASE + 0x44))
 
-	for(;;);
+#define LED_PIN 5
+#define GPIOA_BASE 0x40020000UL
+#define GPIOA_MODER (*(volatile uint32_t *) (GPIOA_BASE + 0x00))
+#define GPIOA_BSRR (*(volatile uint32_t *) (GPIOA_BASE + 0x18))
 
+#define B1_USER_PIN 13
+#define GPIOC_BASE 0x40020800UL
+#define GPIOC_MODER (*(volatile uint32_t *) (GPIOC_BASE + 0x00))
+#define GPIOC_IDR (*(volatile uint32_t *) (GPIOC_BASE + 0x10))
+
+#define EXTI13_PIN 13
+#define EXTI_BASE 0x40013C00UL
+#define EXTI_IMR (*(volatile uint32_t *) (EXTI_BASE + 0x00))
+#define EXTI_FTSR (*(volatile uint32_t *) (EXTI_BASE + 0x0C))
+#define EXTI_PR (*(volatile uint32_t *) (EXTI_BASE + 0x14))
+
+#define SYSCFG_BASE 0x40013800UL
+#define SYSCFG_EXTICR4 (*(volatile uint32_t *) (SYSCFG_BASE +  0x14))
+
+#define TIM2_BASE 0x40000000UL
+#define TIM2_CR1 (*(volatile uint32_t *) (TIM2_BASE + 0x00))
+#define TIM2_PSC (*(volatile uint32_t *) (TIM2_BASE + 0x28))
+#define TIM2_ARR (*(volatile uint32_t *) (TIM2_BASE + 0x2C))
+#define TIM2_DIER (*(volatile uint32_t *)(TIM2_BASE + 0x0C))
+#define TIM2_SR (*(volatile uint32_t *)(TIM2_BASE + 0x10))
+
+#define NVIC_ISER0 (*(volatile uint32_t *)(0xE000E100 + 4 * 0))
+#define NVIC_ISER1 (*(volatile uint32_t *)(0xE000E100 + 4 * 1))
+
+volatile uint32_t bike_mode = 0;
+volatile uint32_t led_on = 0;
+
+int main(void)
+{
+	RCC_AHB1ENR |= (1U << 0);
+	RCC_AHB1ENR |= (1U << 2);
+
+	RCC_APB1ENR |= (1U << 0);
+
+	RCC_APB2ENR |= (1U << 14); // enable SYSCFGEN
+
+	GPIOA_MODER &= ~(3U << LED_PIN * 2);
+	GPIOA_MODER |= (1U << LED_PIN * 2);
+
+	GPIOC_MODER &= ~(3U << B1_USER_PIN * 2); //	00 is the input state
+
+	SYSCFG_EXTICR4 &= ~(0xFU << 4);
+	SYSCFG_EXTICR4 |= (2U << 4); // 0010 for GPIOC
+
+	EXTI_IMR |= (1U << EXTI13_PIN);
+	EXTI_FTSR |= (1U << EXTI13_PIN);
+
+	NVIC_ISER0 |= (1U << 28);
+	NVIC_ISER1 |= (1U << 8);
+
+	TIM2_PSC = 0;
+	TIM2_ARR = 3999999;
+
+	TIM2_DIER |= (1U << 0); // UIE enabled
+
+	TIM2_CR1 |= (1U << 0); // enable timer
+
+	while (1)
+	{
+		if (bike_mode == 0) {
+			GPIOA_BSRR = (1U << (LED_PIN + 16)); // reset pin
+			led_on = 0;
+		} else if (bike_mode == 1){
+			GPIOA_BSRR = (1U << LED_PIN);
+			led_on = 1;
+		}
+	}
+}
+
+void EXTI15_10_IRQHandler(void)
+{
+	if (EXTI_PR & (1U << 13)) { // check that EXTI13 is the interrupt pending
+		EXTI_PR = (1U << 13); // clear PR
+		if (bike_mode == 2) {
+			bike_mode = 0;
+		} else {
+			bike_mode++;
+		}
+	}
+}
+
+void TIM2_IRQHandler(void)
+{
+    if (TIM2_SR & (1U << 0)) {
+    	TIM2_SR &= ~(1U << 0); // clear PR
+    	if (bike_mode == 2) {
+    		if (led_on == 1) {
+				GPIOA_BSRR = (1U << (LED_PIN + 16));
+				led_on = 0;
+			} else {
+				GPIOA_BSRR = (1U << LED_PIN);
+				led_on = 1;
+			}
+    	}
+
+    }
 }
